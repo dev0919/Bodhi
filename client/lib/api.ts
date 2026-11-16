@@ -1,5 +1,16 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+export async function isProctoringEnabled(): Promise<boolean> {
+  try {
+    const response = await fetch(`${BASE}/api/health`, { cache: "no-store" });
+    if (!response.ok) return false;
+    const health = (await response.json()) as { proctoring_enabled?: boolean };
+    return health.proctoring_enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 type ClerkWindow = typeof window & {
   Clerk?: { session?: { getToken: () => Promise<string | null> } };
 };

@@ -15,7 +15,7 @@ import { InterviewSessionView } from "@/components/interview/InterviewSessionVie
 import { useInterviewAudio } from "@/hooks/useInterviewAudio";
 import { useProctoring } from "@/hooks/useProctoring";
 import { useSentimentAnalysis } from "@/hooks/useSentimentAnalysis";
-import { endInterview, prepareInterview } from "@/lib/api";
+import { endInterview, isProctoringEnabled, prepareInterview } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Phase = "idle" | "listening" | "recording" | "processing" | "speaking" | "ended";
@@ -140,7 +140,9 @@ export default function InterviewPage() {
     setError("");
     setPhase("processing");
     try {
-      const cameraOk = await proctoring.initCamera();
+      const cameraOk = (await isProctoringEnabled())
+        ? await proctoring.initCamera()
+        : false;
       await audio.initMic();
 
       const res = await prepareInterview({
