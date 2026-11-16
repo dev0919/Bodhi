@@ -103,8 +103,8 @@ def generate_report(
 
     # ── Overall score ─────────────────────────────────────────────
     overall_avg = total_composite / total_questions if total_questions else 0
-    overall_pct = _to_pct(overall_avg)
-    overall_grade = _to_grade(overall_pct)
+    overall_pct = _to_pct(overall_avg) if total_questions else None
+    overall_grade = _to_grade(overall_pct) if overall_pct is not None else "N/A"
 
     # ── Cross-section insights ────────────────────────────────────
     cross_insights = _build_cross_insights(phase_memories, answer_scores)
@@ -116,7 +116,11 @@ def generate_report(
     behavioral_summary = _build_behavioral_summary(sentiment_data or [])
 
     # ── Hiring recommendation ─────────────────────────────────────
-    recommendation = _hiring_recommendation(overall_pct, phase_breakdown, proctoring_summary)
+    recommendation = (
+        _hiring_recommendation(overall_pct, phase_breakdown, proctoring_summary)
+        if overall_pct is not None else
+        "Interview ended before any scored questions. No performance grade or hiring recommendation is available."
+    )
 
     # ── Agentic generation for qualitative fields ──────────────────
     from src.agents.report_agent import generate_agentic_report_summary
@@ -126,7 +130,7 @@ def generate_report(
         proctoring_summary=proctoring_summary,
         phase_scores=phase_scores,
         custom_metrics=custom_metrics or [],
-    )
+    ) if total_questions else {}
 
     cross_insights = agentic_data.get("cross_section_insights") or cross_insights
     recommendation = agentic_data.get("hiring_recommendation") or recommendation

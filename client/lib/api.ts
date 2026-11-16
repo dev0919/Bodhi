@@ -467,7 +467,7 @@ export const sendAudioStream = async (
 
 export interface InterviewReport {
   overall_grade: string;
-  overall_score_pct: number;
+  overall_score_pct: number | null;
   total_questions: number;
   phase_breakdown: Record<string, {
     score_pct: number;
@@ -522,12 +522,14 @@ export interface InterviewReport {
   };
 }
 
-export const getInterviewReport = (sessionId: string) =>
-  request<InterviewReport>(`/api/interviews/${sessionId}/report`);
+export const getInterviewReport = (sessionId: string, authToken?: string) =>
+  request<InterviewReport>(`/api/interviews/${sessionId}/report`, undefined, authToken);
 
-export const downloadReportPDF = async (sessionId: string) => {
+export const downloadReportPDF = async (sessionId: string, authToken?: string) => {
   const headers = new Headers();
-  if (typeof window !== "undefined") {
+  if (authToken) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  } else if (typeof window !== "undefined") {
     try {
       const token = await (window as ClerkWindow).Clerk?.session?.getToken();
       if (token) headers.set("Authorization", `Bearer ${token}`);

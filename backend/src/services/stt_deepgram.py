@@ -49,6 +49,7 @@ class DeepgramStreamingSTT:
         language: Optional[str] = None,
         endpointing_ms: Optional[int] = None,
         utterance_end_ms: Optional[int] = None,
+        keyterms: Optional[list[str]] = None,
     ) -> None:
         self.api_key = api_key
         self.model = model or os.getenv("DEEPGRAM_MODEL", "nova-3")
@@ -56,13 +57,16 @@ class DeepgramStreamingSTT:
         self.endpointing_ms = (
             endpointing_ms
             if endpointing_ms is not None
-            else int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "500"))
+            else int(os.getenv("DEEPGRAM_ENDPOINTING_MS", "400"))
         )
         self.utterance_end_ms = (
             utterance_end_ms
             if utterance_end_ms is not None
-            else int(os.getenv("DEEPGRAM_UTTERANCE_END_MS", "1500"))
+            else int(os.getenv("DEEPGRAM_UTTERANCE_END_MS", "1000"))
         )
+        self.keyterms = list(dict.fromkeys(
+            term.strip() for term in (keyterms or []) if term and term.strip()
+        ))[:20]
 
         self.ws: Optional["websockets.ClientConnection"] = None
         self._receive_task: Optional[asyncio.Task] = None
@@ -106,7 +110,7 @@ class DeepgramStreamingSTT:
             self._keepalive_task.cancel()
             self._keepalive_task = None
 
-        params = urlencode({
+        params = {
             "model": self.model,
             "language": self.language,
             "encoding": "linear16",
@@ -122,7 +126,15 @@ class DeepgramStreamingSTT:
             # Keep "uh"/"um" in the transcript so behavioral filler-rate scoring
             # can see them (Deepgram strips them by default).
             "filler_words": "true",
-        })
+        }
+        # Nova-3 uses repeated keyterm parameters for proper names. These
+        # terms bias recognition; they do not replace the candidate's words.
+        if self.keyterms and self.model.startswith("nova-3"):
+            params["redact_usage"] = "true"
+        query = list(params.items())
+        if self.model.startswith("nova-3"):
+            query.extend(("keyterm", term) for term in self.keyterms)
+        params = urlencode(query)
         url = f"{self.WS_URL}?{params}"
         headers = {"Authorization": f"Token {self.api_key}"}
 
@@ -228,9 +240,10 @@ class DeepgramStreamingSTT:
                         else ""
                     )
                     is_final = data.get("is_final", False)
+                    speech_final = data.get("speech_final", False)
 
                     if transcript:
-                        if is_final:
+                        if is_final or speech_final:
                             # Finalized segment — accumulate
                             self._accumulated_transcript += transcript + " "
                             if self._on_final:
@@ -242,6 +255,13 @@ class DeepgramStreamingSTT:
                             interim = self._accumulated_transcript + transcript
                             if self._on_interim:
                                 await self._on_interim(interim.strip())
+
+                    # Endpointing's speech_final arrives before UtteranceEnd.
+                    # Start the reply as soon as Deepgram finalizes this turn.
+                    if speech_final and self._accumulated_transcript.strip():
+                        if self._on_utterance_end:
+                            await self._on_utterance_end(self._accumulated_transcript.strip())
+                        self._accumulated_transcript = ""
 
                 elif msg_type == "UtteranceEnd":
                     # Deepgram's endpointing detected end-of-turn

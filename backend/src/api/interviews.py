@@ -982,7 +982,13 @@ async def interview_websocket(
         persona = initial_state.get("interviewer_persona", "bodhi")
         voice = "shreya" if persona == "riya" else "shubh"
         session_tts = SarvamTTSStream(api_key=sarvam_key, voice=voice, sample_rate=tts_sample_rate)
-        session_stt = DeepgramStreamingSTT(api_key=deepgram_key)
+        session_stt = DeepgramStreamingSTT(
+            api_key=deepgram_key,
+            keyterms=[
+                initial_state.get("candidate_name", ""),
+                initial_state.get("target_company", ""),
+            ],
+        )
 
         # Pre-warm the Sarvam TTS connection in parallel with greeting generation.
         tts_prewarm = asyncio.create_task(session_tts.connect()) if sarvam_key else None
@@ -1040,6 +1046,8 @@ async def interview_websocket(
 
         # ── One user turn: transcript → graph tokens → TTS audio ─────────
         async def run_turn(transcript: str, speech_duration: float = 0.0) -> None:
+            turn_started_at = asyncio.get_running_loop().time()
+            first_audio_at: float | None = None
             behavioral: dict = {}
             try:
                 from src.services.behavioral import compute_speech_behavioral
@@ -1086,6 +1094,8 @@ async def interview_websocket(
                     graph, graph_config, user_input, session_tts, result_holder, token_callback=on_token
                 ):
                     if chunk:
+                        if first_audio_at is None:
+                            first_audio_at = asyncio.get_running_loop().time()
                         await websocket.send_bytes(chunk)
             except asyncio.CancelledError:
                 # Barge-in: turn was interrupted — drop it silently.
@@ -1110,6 +1120,12 @@ async def interview_websocket(
 
             phase = result_holder.get("phase", "unknown")
             should_end = result_holder.get("should_end", False)
+            _stream_log.info(
+                "[LATENCY] session=%s first_audio_ms=%s reply_complete_ms=%d",
+                session_id,
+                round((first_audio_at - turn_started_at) * 1000) if first_audio_at else "none",
+                round((asyncio.get_running_loop().time() - turn_started_at) * 1000),
+            )
 
             if cache:
                 try:
@@ -1170,7 +1186,7 @@ async def interview_websocket(
             speech_duration = 0.0
             if turn_speech_start is not None:
                 elapsed = asyncio.get_running_loop().time() - turn_speech_start
-                speech_duration = max(0.0, elapsed - session_stt.utterance_end_ms / 1000.0)
+                speech_duration = max(0.0, elapsed - session_stt.endpointing_ms / 1000.0)
             turn_speech_start = None
             # Safety: cancel any still-running prior turn.
             await _cancel_pipeline()
@@ -2058,13 +2074,18 @@ def _generate_pdf_report(report_data: dict) -> bytes:
     # Overall Score
     story.append(Paragraph("Overall Performance", heading_style))
     overall_grade = report_data.get("overall_grade", "N/A")
-    overall_score = report_data.get("overall_score_pct", 0)
+    overall_score = report_data.get("overall_score_pct")
     
-    grade_color = colors.green if overall_score >= 70 else colors.orange if overall_score >= 50 else colors.red
+    grade_color = (
+        colors.green if overall_score is not None and overall_score >= 70
+        else colors.orange if overall_score is not None and overall_score >= 50
+        else colors.red if overall_score is not None
+        else BRAND_PRIMARY
+    )
     
     score_data = [
         ["Grade", "Score", "Questions"],
-        [overall_grade, f"{overall_score}%", str(report_data.get("total_questions", 0))],
+        [overall_grade, f"{overall_score}%" if overall_score is not None else "Not scored", str(report_data.get("total_questions", 0))],
     ]
     score_table = Table(score_data, colWidths=[2*inch, 2*inch, 2*inch])
     score_table.setStyle(TableStyle([

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import {
   AlertIcon,
   ArrowLeftIcon,
@@ -95,6 +96,7 @@ export default function ReportPage() {
   const params = useParams();
   const router = useRouter();
   const sessionId = params.sessionId as string;
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   const [report, setReport] = useState<InterviewReport | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +104,7 @@ export default function ReportPage() {
   const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !isLoaded || !isSignedIn) return;
     let cancelled = false;
     const MAX_ATTEMPTS = 40;
     const POLL_MS = 2000;
@@ -114,7 +116,8 @@ export default function ReportPage() {
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (cancelled) return;
         try {
-          const data = await getInterviewReport(sessionId);
+          const token = await getToken();
+          const data = await getInterviewReport(sessionId, token ?? undefined);
           if (cancelled) return;
           setReport(data);
           setLoading(false);
@@ -141,12 +144,13 @@ export default function ReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, isLoaded, isSignedIn, getToken]);
 
   const handleDownloadPDF = async () => {
     setDownloadingPDF(true);
     try {
-      await downloadReportPDF(sessionId);
+      const token = await getToken();
+      await downloadReportPDF(sessionId, token ?? undefined);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -207,7 +211,9 @@ export default function ReportPage() {
               >
                 {report.overall_grade}
               </div>
-              <p className="mt-2 text-xs text-neutral-500">{report.overall_score_pct}%</p>
+              <p className="mt-2 text-xs text-neutral-500">
+                {report.overall_score_pct === null ? "Not scored" : `${report.overall_score_pct}%`}
+              </p>
             </div>
             <div className="space-y-1 text-right text-sm text-neutral-500">
               <p>
