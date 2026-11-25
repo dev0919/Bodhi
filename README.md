@@ -10,7 +10,7 @@
 
 *Watch the end-to-end interview flow, from introduction to the final technical deep-dive.*
 
-[![Bodhi Demo Video](https://img.youtube.com/vi/tvwdEFT3wSc/maxresdefault.jpg)](https://www.youtube.com/watch?v=tvwdEFT3wSc)
+[![Bodhi Demo Video](https://img.youtube.com/vi/6Kj1s2dooCA/maxresdefault.jpg)](https://www.youtube.com/watch?v=6Kj1s2dooCA)
 
 ---
 

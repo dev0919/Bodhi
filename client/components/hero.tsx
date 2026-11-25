@@ -70,6 +70,16 @@ export default function Hero() {
                   Start practicing
                   <span aria-hidden>→</span>
                 </Link>
+                <Link
+                  href="https://youtu.be/6Kj1s2dooCA"
+                  className="h-[48px] px-8 flex items-center justify-center gap-2 border border-[#0a0a0a]/15 text-[#0a0a0a] text-[14px] font-medium tracking-[-0.01em] rounded-full transition-all duration-300 hover:border-[#0a0a0a]/35 hover:bg-black/[0.02] active:scale-95"
+                  style={{ fontFamily: "var(--font-inter)" }}
+                >
+                  <span aria-hidden className="text-[11px]">
+                    ▶
+                  </span>
+                  Watch how it works
+                </Link>
               </div>
 
               <p
