@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 
 from src.api.deps import get_cache, get_deepgram_key, get_graph, get_llm, get_sarvam_key, get_storage, require_auth
 from src.api.auth import authenticate_websocket
@@ -350,6 +350,21 @@ def generate_interview_curriculum(
     return result
 
 
+def _initialize_greeting(graph, initial_state: dict, graph_config: dict) -> dict:
+    """Persist the opening turn without waiting on an external model."""
+    name = initial_state.get("candidate_name") or "Candidate"
+    role = initial_state.get("target_role") or "the selected role"
+    company = initial_state.get("target_company") or "your target company"
+    greeting = (
+        f"Welcome, {name}. I'm Bodhi, your interviewer for the {role} role at {company}. "
+        "Please introduce yourself and tell me about a project you have worked on."
+    )
+    messages = list(initial_state.get("messages", [])) + [AIMessage(content=greeting)]
+    result = {**initial_state, "messages": messages}
+    graph.update_state(graph_config, result, as_node="interviewer")
+    return result
+
+
 @router.post("/prepare", response_model=InterviewPrepareResponse, status_code=201)
 async def prepare_interview(
     body: InterviewStartRequest,
@@ -363,11 +378,11 @@ async def prepare_interview(
 
     resolved_user_profile_id = _resolve_owned_profile_id(storage, body.user_id, user_id)
 
-    candidate_profile, jd_context, gap_map = _load_candidate_context(
-        body.mode, resolved_user_profile_id, body.jd_text, storage, llm
+    candidate_profile, jd_context, gap_map = await asyncio.to_thread(
+        _load_candidate_context, body.mode, resolved_user_profile_id, body.jd_text, storage, llm
     )
-    entity_context = _load_entity_context(body.company, body.role, cache, storage)
-    suggested_topics = _load_suggested_topics(body.company, body.role, cache)
+    entity_context = await asyncio.to_thread(_load_entity_context, body.company, body.role, cache, storage)
+    suggested_topics = await asyncio.to_thread(_load_suggested_topics, body.company, body.role, cache)
     
     experience_level_used = body.experience_level
     if body.mode != "standard" and resolved_user_profile_id and storage:
@@ -378,8 +393,8 @@ async def prepare_interview(
     # Pre-generate curriculum (2 technical + 2 DSA questions) unless in resume-based mode
     curriculum = {}
     if body.mode != "option_a":
-        curriculum = generate_interview_curriculum(
-            body.company, body.role, experience_level_used, storage, jd_text=body.jd_text,
+        curriculum = await asyncio.to_thread(
+            generate_interview_curriculum, body.company, body.role, experience_level_used, storage, jd_text=body.jd_text,
             candidate_profile=candidate_profile, gap_map=gap_map,
         )
         if cache:
@@ -510,7 +525,7 @@ async def start_interview(
         "gap_map": gap_map,
     }
 
-    result = await asyncio.to_thread(graph.invoke, initial_state, graph_config)
+    result = await asyncio.to_thread(_initialize_greeting, graph, initial_state, graph_config)
     greeting = _extract_text(
         result["messages"][-1].content
         if result["messages"] and hasattr(result["messages"][-1], "content")
@@ -985,6 +1000,7 @@ async def interview_websocket(
         session_stt = DeepgramStreamingSTT(
             api_key=deepgram_key,
             keyterms=[
+                "Bodhi",
                 initial_state.get("candidate_name", ""),
                 initial_state.get("target_company", ""),
             ],
@@ -994,7 +1010,7 @@ async def interview_websocket(
         tts_prewarm = asyncio.create_task(session_tts.connect()) if sarvam_key else None
 
         # First graph invocation (Greeting) — blocking full-text generation.
-        result = await asyncio.to_thread(graph.invoke, initial_state, graph_config)
+        result = await asyncio.to_thread(_initialize_greeting, graph, initial_state, graph_config)
         greeting = ""
         if result["messages"] and hasattr(result["messages"][-1], "content"):
             greeting = _extract_text(result["messages"][-1].content).strip()
@@ -1604,7 +1620,7 @@ async def start_interview_stream(
 
     _stream_log.info("[START-STREAM] Session %s: invoking graph for greeting...", session_id)
     result = await loop.run_in_executor(
-        None, lambda: graph.invoke(initial_state, config=graph_config)
+        None, lambda: _initialize_greeting(graph, initial_state, graph_config)
     )
     greeting = _extract_text(
         result["messages"][-1].content

@@ -1,10 +1,12 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from langchain_core.messages import SystemMessage, HumanMessage
 from src.services.llm import create_llm, _extract_text
 
 log = logging.getLogger("bodhi.report_agent")
+_REPORT_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="report-summary")
 
 _SYSTEM_PROMPT_BASE = """You are an expert technical recruiter and hiring manager.
 Your task is to analyze a candidate's interview transcript, sentiment data, and proctoring violations to generate a detailed, professional hiring recommendation.
@@ -32,7 +34,11 @@ def generate_agentic_report_summary(
     phase_scores: dict,
     custom_metrics: list[str] | None = None,
 ) -> dict:
-    llm = create_llm(api_key=os.getenv("GOOGLE_API_KEY", ""))
+    llm = create_llm(api_key=os.getenv("GOOGLE_API_KEY", "")).model_copy(update={
+        "request_timeout": float(os.getenv("REPORT_LLM_TIMEOUT_SEC", "12")),
+        "max_tokens": 900,
+        "max_retries": 0,
+    })
 
     custom_metrics = custom_metrics or []
     system_prompt = _SYSTEM_PROMPT_BASE
@@ -57,10 +63,16 @@ TRANSCRIPT:
 Generate the hiring analysis JSON now.
 """
     try:
-        response = llm.invoke([
+        future = _REPORT_POOL.submit(llm.invoke, [
             SystemMessage(content=system_prompt),
             HumanMessage(content=prompt)
         ])
+        # A wall-clock bound also covers providers that trickle response bytes.
+        try:
+            response = future.result(timeout=float(os.getenv("REPORT_SUMMARY_BUDGET_SEC", "15")))
+        except Exception:
+            future.cancel()
+            raise
         raw = _extract_text(response.content).strip()
         if raw.startswith("```json"): raw = raw[7:]
         if raw.startswith("```"): raw = raw[3:]

@@ -2,43 +2,108 @@
 
 import os
 
-# from langchain_google_genai import ChatGoogleGenerativeAI
+import logging
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 # Bound every LLM call so a hung/slow request can't block a turn forever.
-LLM_TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "90"))
-LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "2"))
+LLM_TIMEOUT_SEC = float(os.getenv("LLM_TIMEOUT_SEC", "20"))
+LLM_MAX_RETRIES = int(os.getenv("LLM_MAX_RETRIES", "0"))
 
 DEFAULT_SYSTEM_PROMPT = """You are a friendly, helpful assistant. You can speak in Hindi, English, or Hinglish (code-mixed) naturally.
 Keep responses concise and conversational—suitable for voice playback.
 Respond in the same language style the user uses when possible."""
 
 
-def create_llm(api_key: str, model: str = "gemini-3.1-flash-lite-preview"):
-    """Create the interview chat model.
+class ReliableChatOpenAI(ChatOpenAI):
+    """Reject empty completions and try one alternate free route before failing.
 
-    # ponytail: temporarily routed through OpenRouter — GOOGLE_API_KEY is out of
-    # credits. `api_key`/`model` args from Gemini-era call sites are ignored here;
-    # every caller goes through this one function, so this is the only file that
-    # needed to change. Revert by uncommenting the block below and restoring the
-    # return statement once Gemini credits are back.
-    #
-    # return ChatGoogleGenerativeAI(
-    #     model=model,
-    #     google_api_key=api_key,
-    #     temperature=0.7,
-    #     timeout=LLM_TIMEOUT_SEC,
-    #     max_retries=LLM_MAX_RETRIES,
-    # )
+    Tool-only responses are valid and must remain available to LangGraph.
     """
-    return ChatOpenAI(
-        model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-haiku-4.5"),
+
+    @staticmethod
+    def _usable(result):
+        return any(
+            _extract_text(g.message.content).strip() or g.message.tool_calls
+            for g in result.generations
+        )
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        last_error = None
+        for route in (self.model_name, os.getenv("OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free")):
+            try:
+                result = super()._generate(messages, stop=stop, run_manager=run_manager, **{**kwargs, "model": route})
+                if self._usable(result):
+                    return result
+                raise ValueError("The language model returned an empty response")
+            except Exception as exc:
+                last_error = exc
+                logging.getLogger("bodhi.llm").warning("Model route failed (%s); checking fallback", type(exc).__name__)
+        raise RuntimeError("Interview model unavailable. Please retry the turn.") from last_error
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        last_error = None
+        for route in (self.model_name, os.getenv("OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free")):
+            try:
+                result = await super()._agenerate(messages, stop=stop, run_manager=run_manager, **{**kwargs, "model": route})
+                if self._usable(result):
+                    return result
+                raise ValueError("The language model returned an empty response")
+            except Exception as exc:
+                last_error = exc
+                logging.getLogger("bodhi.llm").warning("Model route failed (%s); checking fallback", type(exc).__name__)
+        raise RuntimeError("Interview model unavailable. Please retry the turn.") from last_error
+
+    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
+        last_error = None
+        for route in (self.model_name, os.getenv("OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free")):
+            emitted = False
+            try:
+                for chunk in super()._stream(messages, stop=stop, run_manager=run_manager, **{**kwargs, "model": route}):
+                    if _extract_text(chunk.message.content).strip() or getattr(chunk.message, "tool_call_chunks", []):
+                        emitted = True
+                    yield chunk
+                if emitted:
+                    return
+                raise ValueError("The language model returned an empty stream")
+            except Exception as exc:
+                if emitted:
+                    # Never replay a partly spoken reply from another model.
+                    raise
+                last_error = exc
+        raise RuntimeError("Interview model unavailable. Please retry the turn.") from last_error
+
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+        last_error = None
+        for route in (self.model_name, os.getenv("OPENROUTER_FALLBACK_MODEL", "nvidia/nemotron-3.5-lightning:free")):
+            emitted = False
+            try:
+                async for chunk in super()._astream(messages, stop=stop, run_manager=run_manager, **{**kwargs, "model": route}):
+                    if _extract_text(chunk.message.content).strip() or getattr(chunk.message, "tool_call_chunks", []):
+                        emitted = True
+                    yield chunk
+                if emitted:
+                    return
+                raise ValueError("The language model returned an empty stream")
+            except Exception as exc:
+                if emitted:
+                    # Never replay a partly spoken reply from another model.
+                    raise
+                last_error = exc
+        raise RuntimeError("Interview model unavailable. Please retry the turn.") from last_error
+
+
+def create_llm(api_key: str, model: str = "gemini-3.1-flash-lite-preview"):
+    """Use a bounded, tool-capable free model for the interview pipeline."""
+    return ReliableChatOpenAI(
+        model=os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free"),
         api_key=os.getenv("OPENROUTER_API_KEY", ""),
         base_url="https://openrouter.ai/api/v1",
         temperature=0.7,
         timeout=LLM_TIMEOUT_SEC,
         max_retries=LLM_MAX_RETRIES,
+        max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1600")),
+        extra_body={"reasoning": {"enabled": False}},
     )
 
 

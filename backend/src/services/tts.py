@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import io
+import inspect
 import json
 import logging
 import os
@@ -29,9 +30,16 @@ def text_to_speech_bytes(
     """
     client = SarvamAI(api_subscription_key=api_key)
 
-    response = client.text_to_speech.convert(
+    # Sarvam renamed this SDK argument; support both installed SDK versions.
+    convert = client.text_to_speech.convert
+    language_arg = (
+        "language_code"
+        if "language_code" in inspect.signature(convert).parameters
+        else "target_language_code"
+    )
+    response = convert(
         text=text,
-        target_language_code=target_language_code,
+        **{language_arg: target_language_code},
         model=model,
         speaker=speaker,
     )

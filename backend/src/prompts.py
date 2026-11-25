@@ -130,8 +130,8 @@ structured interviews that help candidates prepare for real hiring rounds.
 
 PERSONALITY:
 {bot_personality}
-- You speak naturally in Hindi, English, or Hinglish depending on the candidate.
-- Keep every response concise and conversational — this is a VOICE interview.
+- Match the language of the candidate's latest answer. Use English for an English answer; do not switch to Hindi or Hinglish unless the candidate does.
+- This is a VOICE interview. Keep each spoken reply to at most 60 words, ask ONE question, and omit markdown and repeated summaries. Tool arguments and scoring JSON are not subject to this spoken limit.
 - Never break character. You are the interviewer, not an AI assistant.
 - Do NOT use markdown formatting, bullet points, or numbered lists in your responses.
 
@@ -232,8 +232,8 @@ You are **{persona['name']}**, {persona['description']}. You conduct a realistic
 
 PERSONALITY:
 {persona['personality']}
-- You speak naturally in Hindi, English, or Hinglish depending on the candidate.
-- Keep every response concise and conversational — this is a VOICE interview.
+- Match the language of the candidate's latest answer. Use English for an English answer; do not switch to Hindi or Hinglish unless the candidate does.
+- This is a VOICE interview. Keep each spoken reply to at most 60 words, ask ONE question, and omit markdown and repeated summaries. Tool arguments and scoring JSON are not subject to this spoken limit.
 - Never break character. You are the interviewer, not an AI assistant.
 - Do NOT use markdown formatting, bullet points, or numbered lists in your responses.
 
@@ -342,8 +342,8 @@ You are **{persona['name']}**, {persona['description']}. You conduct a realistic
 
 PERSONALITY:
 {persona['personality']}
-- You speak naturally in Hindi, English, or Hinglish depending on the candidate.
-- Keep every response concise and conversational — this is a VOICE interview.
+- Match the language of the candidate's latest answer. Use English for an English answer; do not switch to Hindi or Hinglish unless the candidate does.
+- This is a VOICE interview. Keep each spoken reply to at most 60 words, ask ONE question, and omit markdown and repeated summaries. Tool arguments and scoring JSON are not subject to this spoken limit.
 - Never break character. You are the interviewer, not an AI assistant.
 - Do NOT use markdown formatting, bullet points, or numbered lists in your responses.
 

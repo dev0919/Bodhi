@@ -107,16 +107,21 @@ async def lifespan(app: FastAPI):
             from src.proctoring_backend.services.proctoring.face_detection import FaceDetector
             from src.proctoring_backend.services.proctoring.gaze_analysis import GazeAnalyzer
             from src.proctoring_backend.services.proctoring.object_detection import ObjectDetector
-            from src.proctoring_backend.services.proctoring.emotion_analysis import EmotionAnalyzer
             _factories = {
                 "face_detector": FaceDetector,
                 "gaze_analyzer": GazeAnalyzer,
                 "object_detector": ObjectDetector,
-                "emotion_analyzer": EmotionAnalyzer,
             }
         except Exception as e:
             logger.warning(f"⚠ Proctoring dependencies unavailable: {e}")
             _factories = {}
+
+    if _proctoring_enabled and os.getenv("EMOTION_ANALYSIS_ENABLED", "true").lower() in ("true", "1", "yes"):
+        try:
+            from src.proctoring_backend.services.proctoring.emotion_analysis import EmotionAnalyzer
+            _factories["emotion_analyzer"] = EmotionAnalyzer
+        except Exception as e:
+            logger.warning(f"Emotion model dependencies unavailable: {e}")
 
     for _attr in ("face_detector", "gaze_analyzer", "object_detector", "emotion_analyzer"):
         _factory = _factories.get(_attr)
@@ -141,8 +146,8 @@ async def lifespan(app: FastAPI):
     )
 
     # ── Initialize Behavioral Models ─────────────────────────────────────────
-    if not _proctoring_enabled:
-        logger.warning("Behavioral models skipped (PROCTORING_ENABLED=false)")
+    if not _proctoring_enabled or os.getenv("BEHAVIORAL_ANALYSIS_ENABLED", "true").lower() not in ("true", "1", "yes"):
+        logger.warning("Behavioral models disabled by configuration")
     else:
         logger.info("Loading behavioral analysis models...")
         try:
